@@ -1054,14 +1054,6 @@
       story.appendChild(step);
     });
 
-    const note = document.createElement('div');
-    note.className = 'wp-note';
-    note.innerHTML = `
-      <strong>Nota operativa WordPress.</strong> Questo file è pensato per un blocco HTML o per uno shortcode che accetti JS inline. Se WordPress filtra gli script, la soluzione più robusta è spostare il codice in un template o in un file JS esterno. Per <strong>Emilia-Romagna 2023</strong> il WMS ufficiale regionale resta attivo, ma è stata aggiunta anche una campitura vettoriale di fallback così l’area allagata continua a vedersi anche negli ambienti che non renderizzano il servizio.
-    `;
-    story.appendChild(note);
-  }
-
   const lightbox = document.getElementById('media-lightbox');
   const lightboxImage = document.getElementById('media-lightbox-image');
   const lightboxCaption = document.getElementById('media-lightbox-caption');
