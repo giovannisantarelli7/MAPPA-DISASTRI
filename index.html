@@ -1203,5 +1203,128 @@
   activateEvent(disasterData[0].id, false);
   requestTimelineProgressUpdate();
   </script>
+  <!-- COMUNICAZIONE SCROLL CON WORDPRESS -->
+  <script>
+  (function () {
+
+    /* Se la pagina è aperta direttamente su GitHub,
+       questo codice non fa nulla. */
+    if (window.parent === window) return;
+
+    let parentOrigin = null;
+
+
+    /* WordPress ci comunica che l'iframe è attivo */
+    window.addEventListener("message", function (event) {
+
+      const origineValida =
+        event.origin === "https://www.lasestina.unimi.it" ||
+        event.origin === "https://lasestina.unimi.it";
+
+      if (
+        !origineValida ||
+        !event.data ||
+        event.data.type !== "MAPPA_ENTER"
+      ) {
+        return;
+      }
+
+      parentOrigin = event.origin;
+
+      const scroll =
+        document.scrollingElement ||
+        document.documentElement;
+
+
+      /*
+       * Se entriamo nell'iframe risalendo dal basso,
+       * posizioniamo il contenuto alla fine.
+       */
+      if (event.data.direction === "up") {
+
+        scroll.scrollTop =
+          scroll.scrollHeight -
+          scroll.clientHeight;
+
+      }
+
+    });
+
+
+    /*
+     * Quando siamo al limite superiore/inferiore
+     * dell'iframe, restituiamo lo scroll a WordPress.
+     */
+    window.addEventListener(
+      "wheel",
+      function (event) {
+
+        if (!parentOrigin) return;
+
+        const scroll =
+          document.scrollingElement ||
+          document.documentElement;
+
+        const maxScroll =
+          Math.max(
+            0,
+            scroll.scrollHeight - scroll.clientHeight
+          );
+
+        const inCima =
+          scroll.scrollTop <= 2;
+
+        const inFondo =
+          scroll.scrollTop >= maxScroll - 2;
+
+
+        /* USCITA VERSO IL BASSO */
+
+        if (
+          event.deltaY > 0 &&
+          inFondo
+        ) {
+
+          event.preventDefault();
+
+          window.parent.postMessage(
+            {
+              type: "MAPPA_EXIT",
+              direction: "down",
+              deltaY: event.deltaY
+            },
+            parentOrigin
+          );
+
+          return;
+        }
+
+
+        /* USCITA VERSO L'ALTO */
+
+        if (
+          event.deltaY < 0 &&
+          inCima
+        ) {
+
+          event.preventDefault();
+
+          window.parent.postMessage(
+            {
+              type: "MAPPA_EXIT",
+              direction: "up",
+              deltaY: event.deltaY
+            },
+            parentOrigin
+          );
+
+        }
+
+      },
+      { passive: false }
+    );
+
+  })();
+  </script>
 </body>
 </html>
