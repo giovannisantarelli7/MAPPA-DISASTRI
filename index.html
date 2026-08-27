@@ -719,9 +719,33 @@
     attributionControl: true
   }).setView([42.5, 12.5], 6);
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  /* OTTIMIZZAZIONE TOUCH QUANDO LA MAPPA È DENTRO IL WEBDOC */
+  const webdocTouchMode =
+    window.parent !== window &&
+    (
+      window.matchMedia('(pointer: coarse)').matches ||
+      window.matchMedia('(any-pointer: coarse)').matches ||
+      navigator.maxTouchPoints > 0
+    );
+
+  if (webdocTouchMode) {
+    /*
+     * Su telefono/tablet il trascinamento Leaflet non deve sottrarre
+     * lo swipe verticale allo scrollytelling. Tap e popup restano attivi.
+     */
+    if (map.dragging) map.dragging.disable();
+    if (map.touchZoom) map.touchZoom.disable();
+    if (map.doubleClickZoom) map.doubleClickZoom.disable();
+
+    const mapContainer = map.getContainer();
+    mapContainer.style.touchAction = 'pan-y';
+  }
+
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=cb1_2dbv_1_a5ad624d341747a370fad72f&v=20260827', {
+    subdomains: 'abcd',
     maxZoom: 18,
-    attribution: '&copy; OpenStreetMap contributors'
+    attribution: '&copy; OpenStreetMap contributors, &copy; CARTO'
   }).addTo(map);
 
   const eventIndex = Object.fromEntries(disasterData.map((event, idx) => [event.id, { ...event, order: idx + 1 }]));
@@ -1203,126 +1227,205 @@
   activateEvent(disasterData[0].id, false);
   requestTimelineProgressUpdate();
   </script>
-  <!-- COMUNICAZIONE SCROLL CON WORDPRESS -->
+    <!-- SCROLL HANDOFF WEBDOC: DESKTOP + TRACKPAD + TOUCH + TASTIERA -->
   <script>
   (function () {
 
-    /* Se la pagina è aperta direttamente su GitHub,
-       questo codice non fa nulla. */
     if (window.parent === window) return;
 
+    const ENTER_TYPE = "MAPPA_ENTER";
+    const EXIT_TYPE = "MAPPA_EXIT";
+
+    const ALLOWED_ORIGINS = new Set([
+      "https://www.lasestina.unimi.it",
+      "https://lasestina.unimi.it"
+    ]);
+
     let parentOrigin = null;
+    let exitLocked = false;
 
+    let touchStartY = null;
+    let touchStartedAtTop = false;
+    let touchStartedAtBottom = false;
 
-    /* WordPress ci comunica che l'iframe è attivo */
+    function scrollElement() {
+      return document.scrollingElement || document.documentElement;
+    }
+
+    function maxScroll() {
+      const scroll = scrollElement();
+      return Math.max(0, scroll.scrollHeight - scroll.clientHeight);
+    }
+
+    function atTop() {
+      return scrollElement().scrollTop <= 3;
+    }
+
+    function atBottom() {
+      return scrollElement().scrollTop >= maxScroll() - 3;
+    }
+
+    function interactionBlocked() {
+      /* Evita uscite accidentali mentre è aperta una lightbox/modale. */
+      return (
+        document.body.classList.contains("lightbox-open") ||
+        !!document.querySelector('.media-lightbox.is-open')
+      );
+    }
+
+    function sendExit(direction, delta) {
+      if (!parentOrigin || exitLocked || interactionBlocked()) return;
+
+      exitLocked = true;
+
+      window.parent.postMessage(
+        {
+          type: EXIT_TYPE,
+          direction: direction,
+          deltaY: delta || (direction === "down" ? 40 : -40)
+        },
+        parentOrigin
+      );
+
+      /* Impedisce doppi messaggi prodotti dalla stessa gesture. */
+      window.setTimeout(function () {
+        exitLocked = false;
+      }, 350);
+    }
+
     window.addEventListener("message", function (event) {
-
-      const origineValida =
-        event.origin === "https://www.lasestina.unimi.it" ||
-        event.origin === "https://lasestina.unimi.it";
-
       if (
-        !origineValida ||
+        !ALLOWED_ORIGINS.has(event.origin) ||
         !event.data ||
-        event.data.type !== "MAPPA_ENTER"
+        event.data.type !== ENTER_TYPE
       ) {
         return;
       }
 
       parentOrigin = event.origin;
+      exitLocked = false;
 
-      const scroll =
-        document.scrollingElement ||
-        document.documentElement;
-
+      const scroll = scrollElement();
 
       /*
-       * Se entriamo nell'iframe risalendo dal basso,
-       * posizioniamo il contenuto alla fine.
+       * Rientro simmetrico:
+       * - arrivando dall'alto si parte dall'inizio;
+       * - arrivando dal basso si parte dalla fine.
        */
       if (event.data.direction === "up") {
-
-        scroll.scrollTop =
-          scroll.scrollHeight -
-          scroll.clientHeight;
-
+        scroll.scrollTop = maxScroll();
+      } else {
+        scroll.scrollTop = 0;
       }
-
     });
 
 
-    /*
-     * Quando siamo al limite superiore/inferiore
-     * dell'iframe, restituiamo lo scroll a WordPress.
-     */
+    /* DESKTOP / MOUSE / TRACKPAD */
     window.addEventListener(
       "wheel",
       function (event) {
+        if (!parentOrigin || interactionBlocked()) return;
 
-        if (!parentOrigin) return;
-
-        const scroll =
-          document.scrollingElement ||
-          document.documentElement;
-
-        const maxScroll =
-          Math.max(
-            0,
-            scroll.scrollHeight - scroll.clientHeight
-          );
-
-        const inCima =
-          scroll.scrollTop <= 2;
-
-        const inFondo =
-          scroll.scrollTop >= maxScroll - 2;
-
-
-        /* USCITA VERSO IL BASSO */
-
-        if (
-          event.deltaY > 0 &&
-          inFondo
-        ) {
-
+        if (event.deltaY > 0 && atBottom()) {
           event.preventDefault();
-
-          window.parent.postMessage(
-            {
-              type: "MAPPA_EXIT",
-              direction: "down",
-              deltaY: event.deltaY
-            },
-            parentOrigin
-          );
-
+          sendExit("down", event.deltaY);
           return;
         }
 
-
-        /* USCITA VERSO L'ALTO */
-
-        if (
-          event.deltaY < 0 &&
-          inCima
-        ) {
-
+        if (event.deltaY < 0 && atTop()) {
           event.preventDefault();
-
-          window.parent.postMessage(
-            {
-              type: "MAPPA_EXIT",
-              direction: "up",
-              deltaY: event.deltaY
-            },
-            parentOrigin
-          );
-
+          sendExit("up", event.deltaY);
         }
-
       },
       { passive: false }
     );
+
+
+    /* TELEFONO / TABLET */
+    window.addEventListener(
+      "touchstart",
+      function (event) {
+        if (!parentOrigin || event.touches.length !== 1) return;
+
+        touchStartY = event.touches[0].clientY;
+        touchStartedAtTop = atTop();
+        touchStartedAtBottom = atBottom();
+      },
+      { passive: true }
+    );
+
+    window.addEventListener(
+      "touchmove",
+      function (event) {
+        if (
+          !parentOrigin ||
+          touchStartY === null ||
+          event.touches.length !== 1 ||
+          interactionBlocked()
+        ) {
+          return;
+        }
+
+        const currentY = event.touches[0].clientY;
+        const fingerDelta = currentY - touchStartY;
+        const threshold = 14;
+
+        /* Dito verso l'alto = contenuto verso il basso. */
+        if (
+          touchStartedAtBottom &&
+          fingerDelta < -threshold &&
+          atBottom()
+        ) {
+          event.preventDefault();
+          sendExit("down", Math.abs(fingerDelta));
+          return;
+        }
+
+        /* Dito verso il basso = contenuto verso l'alto. */
+        if (
+          touchStartedAtTop &&
+          fingerDelta > threshold &&
+          atTop()
+        ) {
+          event.preventDefault();
+          sendExit("up", -Math.abs(fingerDelta));
+        }
+      },
+      { passive: false }
+    );
+
+    function resetTouch() {
+      touchStartY = null;
+      touchStartedAtTop = false;
+      touchStartedAtBottom = false;
+    }
+
+    window.addEventListener("touchend", resetTouch, { passive: true });
+    window.addEventListener("touchcancel", resetTouch, { passive: true });
+
+
+    /* TASTIERA / ACCESSIBILITÀ */
+    window.addEventListener("keydown", function (event) {
+      if (!parentOrigin || interactionBlocked()) return;
+
+      const down =
+        event.key === "ArrowDown" ||
+        event.key === "PageDown" ||
+        (event.key === " " && !event.shiftKey);
+
+      const up =
+        event.key === "ArrowUp" ||
+        event.key === "PageUp" ||
+        (event.key === " " && event.shiftKey);
+
+      if (down && atBottom()) {
+        event.preventDefault();
+        sendExit("down", 40);
+      } else if (up && atTop()) {
+        event.preventDefault();
+        sendExit("up", -40);
+      }
+    });
 
   })();
   </script>
